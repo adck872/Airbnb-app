@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Airbnb Investment Intelligence</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Filters">
+        <div class="sidebar-logo">
+          <i class="ti ti-home-2" aria-hidden="true"></i>
+          <span>Airbnb Intel</span>
+        </div>
+        <div class="sidebar-section">
+          <label class="sidebar-label" for="citySelect">City</label>
+          <select id="citySelect">
+            <option selected>London</option>
+            <option>Manchester</option>
+            <option>Edinburgh</option>
+            <option>Bristol</option>
+            <option>Birmingham</option>
+          </select>
+        </div>
+        <div class="sidebar-section">
+          <label class="sidebar-label" for="profileSelect">Investor profile</label>
+          <select id="profileSelect">
+            <option selected>Balanced investor</option>
+            <option>Revenue focused</option>
+            <option>Risk focused</option>
+          </select>
+        </div>
+        <div class="sidebar-section">
+          <label class="sidebar-label" for="roomSelect">Room type</label>
+          <select id="roomSelect">
+            <option selected>All types</option>
+            <option>Entire home/apt</option>
+            <option>Private room</option>
+            <option>Shared room</option>
+          </select>
+        </div>
+        <div class="sidebar-section">
+          <label class="sidebar-label" for="priceSlider">Nightly price range</label>
+          <input type="range" id="priceSlider" min="20" max="500" value="300" step="1" aria-valuetext="up to £300">
+          <div class="sidebar-range-row">
+            <span>£20</span>
+            <span id="priceVal">up to £300</span>
+          </div>
+        </div>
+        <div class="sidebar-section">
+          <label class="sidebar-label" for="reviewSlider">Min. reviews</label>
+          <input type="range" id="reviewSlider" min="0" max="100" value="10" step="5" aria-valuetext="≥ 10">
+          <div class="sidebar-range-row">
+            <span>0</span>
+            <span id="reviewVal">≥ 10</span>
+          </div>
+        </div>
+        <div class="sidebar-section">
+          <label class="sidebar-label" for="availSlider">Min. availability (days/yr)</label>
+          <input type="range" id="availSlider" min="0" max="365" value="60" step="10" aria-valuetext="≥ 60 days">
+          <div class="sidebar-range-row">
+            <span>0</span>
+            <span id="availVal">≥ 60 days</span>
+          </div>
+        </div>
+        <footer class="sidebar-footer">
+          Data: Inside Airbnb snapshot.<br />Not financial or legal advice.
+        </footer>
+      </aside>
+      <main class="main">
+        <div class="stl-notice" role="note">
+          <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+          <span>
+            <strong>London short-term letting rule:</strong>
+            Without planning permission, hosts are restricted to 90 nights per
+            calendar year. This affects estimated revenue calculations.
+          </span>
+        </div>
+        <nav class="nav-tabs" aria-label="App sections">
+          <button type="button" class="nav-tab active" data-tab="overview" aria-selected="true" role="tab">
+            <i class="ti ti-map-2" aria-hidden="true"></i>
+            Market overview
+          </button>
+          <button type="button" class="nav-tab" data-tab="recommendations" aria-selected="false" role="tab">
+            <i class="ti ti-star" aria-hidden="true"></i>
+            Recommendations
+          </button>
+          <button class="nav-tab" data-tab="reviews" aria-selected="false" role="tab">
+            <i class="ti ti-message-circle" aria-hidden="true"></i>
+            Review analysis
+          </button>
+          <button class="nav-tab" data-tab="risks" aria-selected="false" role="tab">
+            <i class="ti ti-shield" aria-hidden="true"></i>
+            Risks &amp; assumptions
+          </button>
+        </nav>
+        <section class="page active" id="page-overview" role="tabpanel">
+          <div class="metrics-row">
+            <div class="metric-card">
+              <div class="metric-label">Active listings</div>
+              <div class="metric-value">86,341</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Median nightly price</div>
+              <div class="metric-value">£112</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Avg. occupancy proxy</div>
+              <div class="metric-value">58%</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Est. annual revenue (median)</div>
+              <div class="metric-value">£23.8k</div>
+            </div>
+          </div>
+          <div class="two-col">
+            <div class="card">
+              <h2 class="section-title">
+                Top boroughs by investment score
+                <div class="tooltip-wrap">
+                  <i class="ti ti-info-circle tooltip-icon" tabindex="0" aria-label="Investment score formula" role="button"></i>
+                  <div class="tooltip-box" role="tooltip">
+                    <div class="tooltip-title">Investment score formula</div>
+                    <code>Score = 0.30·Q + 0.30·I + 0.20·P + 0.10·N − 0.10·M</code>
+                    <ul class="tooltip-vars">
+                      <li><strong>Q</strong> — user rating quality</li>
+                      <li><strong>I</strong> — est. revenue (income)</li>
+                      <li><strong>P</strong> — no. of bookings (popularity)</li>
+                      <li><strong>N</strong> — neighbourhood review quality</li>
+                      <li><strong>M</strong> — no. beds/baths (maintenance)</li>
+                    </ul>
+                  </div>
+                </div>
+              </h2>
+              <div class="table-scroll">
+                <table class="borough-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Borough</th>
+                      <th scope="col">Med. price</th>
+                      <th scope="col">Occupancy</th>
+                      <th scope="col">Est. revenue</th>
+                      <th scope="col">Score</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>Southwark</td><td>£138</td><td>67%</td><td>£33.8k</td>
+                      <td><span class="score-badge score-high">88</span></td>
+                    </tr>
+                    <tr>
+                      <td>Tower Hamlets</td><td>£125</td><td>65%</td><td>£29.7k</td>
+                      <td><span class="score-badge score-high">84</span></td>
+                    </tr>
+                    <tr>
+                      <td>Hackney</td><td>£119</td><td>63%</td><td>£27.4k</td>
+                      <td><span class="score-badge score-high">81</span></td>
+                    </tr>
+                    <tr>
+                      <td>Lambeth</td><td>£108</td><td>61%</td><td>£24.1k</td>
+                      <td><span class="score-badge score-med">74</span></td>
+                    </tr>
+                    <tr>
+                      <td>Islington</td><td>£145</td><td>59%</td><td>£26.2k</td>
+                      <td><span class="score-badge score-med">71</span></td>
+                    </tr>
+                    <tr>
+                      <td>Westminster</td><td>£198</td><td>55%</td><td>£31.5k</td>
+                      <td><span class="score-badge score-med">68</span></td>
+                    </tr>
+                    <tr>
+                      <td>Bromley</td><td>£82</td><td>44%</td><td>£13.1k</td>
+                      <td><span class="score-badge score-low">41</span></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div class="card">
+              <h2 class="section-title">Est. revenue vs. occupancy by property type</h2>
+              <div class="chart-legend">
+                <span class="legend-item">
+                  <span class="legend-dot" style="background:#D85A30;"></span>
+                  Entire home
+                </span>
+                <span class="legend-item">
+                  <span class="legend-dot" style="background:#888780;"></span>
+                  Private room
+                </span>
+                <span class="legend-item">
+                  <span class="legend-dot" style="background:#B4B2A9;"></span>
+                  Shared room
+                </span>
+                <span class="legend-note">Bubble size = listing count</span>
+              </div>
+              <div class="chart-wrap" style="height:210px;">
+                <canvas
+                  id="bubbleChart"
+                  role="img"
+                  aria-label="Bubble chart: estimated annual revenue vs occupancy rate by property type. Entire homes highest at £33.5k and 62% occupancy. Private rooms £13.7k at 55%. Shared rooms £6.5k at 47%."
+                >
+                  Entire home: £33.5k revenue, 62% occupancy.
+                  Private room: £13.7k, 55%.
+                  Shared room: £6.5k, 47%.
+                </canvas>
+              </div>
+            </div>
+          </div>
+          <div class="two-col">
+            <div class="card">
+              <h2 class="section-title">Neighbourhood investment score map</h2>
+              <p class="card-desc">
+                Choropleth coloured by investment score per neighbourhood.
+                GeoJSON boundaries loaded from Inside Airbnb at runtime.
+              </p>
+              <div class="map-placeholder" aria-label="Map placeholder — rendered at runtime using GeoJSON">
+                <i class="ti ti-map" aria-hidden="true"></i>
+                <strong>Neighbourhood boundary map</strong>
+                <span>
+                  Rendered at runtime using GeoJSON from Inside Airbnb.
+                  Each polygon coloured by investment score (0–100).
+                </span>
+                <div class="map-legend-row">
+                  <span>Low</span>
+                  <div class="map-legend-bar" aria-hidden="true">
+                    <span style="background:#FCEBEB;"></span>
+                    <span style="background:#FAEEDA;"></span>
+                    <span style="background:#EAF3DE;"></span>
+                    <span style="background:#639922;"></span>
+                    <span style="background:#3B6D11;"></span>
+                  </div>
+                  <span>High</span>
+                </div>
+              </div>
+              <div class="map-controls">
+                <label for="mapMetric" class="sr-only">Colour map by</label>
+                <select id="mapMetric">
+                  <option>Colour by: investment score</option>
+                  <option>Colour by: est. revenue</option>
+                  <option>Colour by: occupancy proxy</option>
+                  <option>Colour by: avg. rating (Q)</option>
+                  <option>Colour by: no. bookings (P)</option>
+                </select>
+                <button class="btn-outline" type="button">
+                  <i class="ti ti-layers-intersect" aria-hidden="true"></i>
+                  Borough overlay
+                </button>
+              </div>
+            </div>
+            <div class="card">
+              <h2 class="section-title">Nightly price distribution</h2>
+              <div class="chart-wrap" style="height:240px;">
+                <canvas id="priceDistChart" role="img" aria-label="Histogram of nightly prices across all London listings. Peak between £80 and £120.">
+                  Most listings priced between £60 and £160 per night.
+                </canvas>
+              </div>
+            </div>
+          </div>
+        </section>
+        <section class="page" id="page-recommendations" role="tabpanel" hidden>
+          <div class="page-header">
+            <p class="page-subtitle">
+              Recommendations for:
+              <strong>Balanced investor · London · All types</strong>
+            </p>
+            <div class="btn-group">
+              <button class="btn-outline" type="button">
+                <i class="ti ti-download" aria-hidden="true"></i>
+                Export memo
+              </button>
+              <button class="btn-primary" type="button" id="regenBtn">
+                <i class="ti ti-sparkles" aria-hidden="true"></i>
+                Regenerate
+              </button>
+            </div>
+          </div>
+          <h2 class="list-title">Top 3 recommended boroughs</h2>
+          <article class="rec-card top">
+            <div class="rec-header">
+              <div class="rec-title">
+                <span class="rec-rank" aria-label="Rank 1">1</span>
+                Southwark
+              </div>
+              <span class="score-badge score-high wide">Score: 88</span>
+            </div>
+            <p class="rec-body">
+              High demand near London Bridge, Borough Market, and Tate Modern.
+              Median nightly rate of £138 with 67% occupancy. Entire homes
+              dominate. Lower proportion of professional hosts signals room to
+              compete.
+            </p>
+            <div class="ai-box">
+              <div class="ai-label">
+                <i class="ti ti-robot" aria-hidden="true"></i>
+                AI rationale
+              </div>
+              <p class="ai-text">
+                Southwark ranks first because it balances above-median pricing
+                with consistently high occupancy relative to comparable
+                boroughs. Guest reviews highlight proximity to central
+                attractions and transport links as key positives. The area shows
+                lower-than-average 90-night saturation risk, meaning demand
+                appears genuine rather than concentrated in short windows.
+              </p>
+            </div>
+          </article>
+          <article class="rec-card top">
+            <div class="rec-header">
+              <div class="rec-title">
+                <span class="rec-rank" aria-label="Rank 2">2</span>
+                Tower Hamlets
+              </div>
+              <span class="score-badge score-high wide">Score: 84</span>
+            </div>
+            <p class="rec-body">
+              Strong demand from tech workers and tourists visiting Shoreditch,
+              Spitalfields, and Canary Wharf. Median £125/night. Entire 2-bed
+              flats perform particularly well. High review volume improves data
+              confidence.
+            </p>
+            <div class="ai-box">
+              <div class="ai-label">
+                <i class="ti ti-robot" aria-hidden="true"></i>
+                AI rationale
+              </div>
+              <p class="ai-text">
+                Tower Hamlets combines strong occupancy with a diverse guest
+                mix, reducing seasonal volatility. Reviews frequently cite
+                walkability and nightlife access. Minor risk: a subset of
+                listings shows review velocity decline, potentially signalling
+                emerging supply pressure in certain neighbourhoods.
+              </p>
+            </div>
+          </article>
+          <article class="rec-card top">
+            <div class="rec-header">
+              <div class="rec-title">
+                <span class="rec-rank" aria-label="Rank 3">3</span>
+                Hackney
+              </div>
+              <span class="score-badge score-high wide">Score: 81</span>
+            </div>
+            <p class="rec-body">
+              Popular with younger travellers and cultural tourists. Median
+              £119/night with 63% occupancy. Lower property prices vs. inner
+              London may improve gross yield. Neighbourhood feel positively
+              mentioned in reviews.
+            </p>
+            <div class="ai-box">
+              <div class="ai-label">
+                <i class="ti ti-robot" aria-hidden="true"></i>
+                AI rationale
+              </div>
+              <p class="ai-text">
+                Hackney's investment case rests on growing supply of attractive
+                entire homes, strong review sentiment, and relatively lower
+                acquisition cost. Main caveat: slight host concentration risk —
+                a small number of multi-listing hosts account for a meaningful
+                share of revenue, complicating like-for-like benchmarking.
+              </p>
+            </div>
+          </article>
+          <h2 class="list-title" style="margin-top:1.5rem;">Top 3 recommended property types</h2>
+          <div class="two-col">
+            <article class="rec-card green-left">
+              <div class="rec-header">
+                <div class="rec-title">
+                  <i class="ti ti-home-2" aria-hidden="true"></i>
+                  Entire 2-bed flat
+                </div>
+                <span class="score-badge score-high wide">Score: 91</span>
+              </div>
+              <p class="rec-body">
+                Best risk-adjusted return. Accommodates 2-4 guests. Median est.
+                revenue £38k/yr. High avg. rating (Q = 4.71). Maintenance
+                penalty (M) partially offset by strong income (I).
+              </p>
+            </article>
+            <article class="rec-card green-left">
+              <div class="rec-header">
+                <div class="rec-title">
+                  <i class="ti ti-building-skyscraper" aria-hidden="true"></i>
+                  Entire 1-bed flat
+                </div>
+                <span class="score-badge score-high wide">Score: 82</span>
+              </div>
+              <p class="rec-body">
+                Lower entry point, strong solo/couple demand. Est. revenue
+                £27k/yr. Lower M penalty. Good for first-time hosts managing
+                maintenance overhead.
+              </p>
+            </article>
+          </div>
+        </section>
+        <section class="page" id="page-reviews" role="tabpanel" hidden>
+          <div class="page-header">
+            <p class="page-subtitle">
+              Analysing:
+              <strong>Southwark · 1,240 reviews sampled</strong>
+            </p>
+            <button class="btn-primary" type="button" id="analyseBtn">
+              <i class="ti ti-sparkles" aria-hidden="true"></i>
+              Analyse reviews
+            </button>
+          </div>
+          <div class="two-col">
+            <div class="card">
+              <h2 class="section-title">Positive themes</h2>
+              <div class="bar-list">
+                <div class="bar-row"><span class="bar-label">Location</span><div class="bar-track"><div class="bar-fill green" style="width:84%;"></div></div><span class="bar-pct">84%</span></div>
+                <div class="bar-row"><span class="bar-label">Cleanliness</span><div class="bar-track"><div class="bar-fill green" style="width:76%;"></div></div><span class="bar-pct">76%</span></div>
+                <div class="bar-row"><span class="bar-label">Value</span><div class="bar-track"><div class="bar-fill green" style="width:68%;"></div></div><span class="bar-pct">68%</span></div>
+                <div class="bar-row"><span class="bar-label">Check-in</span><div class="bar-track"><div class="bar-fill green" style="width:61%;"></div></div><span class="bar-pct">61%</span></div>
+                <div class="bar-row"><span class="bar-label">Comfort</span><div class="bar-track"><div class="bar-fill green" style="width:55%;"></div></div><span class="bar-pct">55%</span></div>
+              </div>
+            </div>
+            <div class="card">
+              <h2 class="section-title">Negative themes</h2>
+              <div class="bar-list">
+                <div class="bar-row"><span class="bar-label">Noise</span><div class="bar-track"><div class="bar-fill red" style="width:32%;"></div></div><span class="bar-pct">32%</span></div>
+                <div class="bar-row"><span class="bar-label">Wi-Fi</span><div class="bar-track"><div class="bar-fill red" style="width:18%;"></div></div><span class="bar-pct">18%</span></div>
+                <div class="bar-row"><span class="bar-label">Communication</span><div class="bar-track"><div class="bar-fill red" style="width:14%;"></div></div><span class="bar-pct">14%</span></div>
+                <div class="bar-row"><span class="bar-label">Size</span><div class="bar-track"><div class="bar-fill red" style="width:11%;"></div></div><span class="bar-pct">11%</span></div>
+                <div class="bar-row"><span class="bar-label">Access</span><div class="bar-track"><div class="bar-fill red" style="width:8%;"></div></div><span class="bar-pct">8%</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <h2 class="section-title">AI review summary</h2>
+            <div class="ai-text">
+              <p>
+                Across the sampled Southwark reviews, guests consistently
+                praise the central location and ease of access to transport
+                links. Cleanliness is a strong differentiator for top-rated
+                listings. The most common concern is ambient noise, particularly
+                near Borough Market and the Jubilee Line. Wi-Fi reliability is
+                flagged in roughly 1 in 5 reviews — a quick operational win for
+                hosts.
+              </p>
+              <p style="margin-top:0.75rem;">
+                <strong>Investment signal:</strong> Noise complaints are
+                structural rather than operational — a property on a quieter
+                residential street in the same borough avoids this cluster of
+                negative sentiment.
+              </p>
+            </div>
+          </div>
+        </section>
+        <section class="page" id="page-risks" role="tabpanel" hidden>
+          <div class="card">
+            <h2 class="section-title">Risk &amp; assumption summary</h2>
+            <p class="card-desc" style="margin-bottom:0.75rem;">
+              This app is not financial or legal advice. All estimates are based
+              on an Inside Airbnb snapshot and carry the limitations noted
+              below.
+            </p>
+            <ul class="risk-list">
+              <li class="risk-row">
+                <i class="ti ti-calendar-x risk-icon risk-icon--high" aria-hidden="true"></i>
+                <div class="risk-content">
+                  <div class="risk-title">90-night cap (London)</div>
+                  <p class="risk-desc">
+                    Under the Deregulation Act 2015, London hosts may rent
+                    entire properties short-term for a maximum of 90 nights per
+                    calendar year without planning permission. Revenue estimates
+                    are capped accordingly.
+                  </p>
+                </div>
+                <span class="risk-badge risk-high">Regulatory</span>
+              </li>
+              <li class="risk-row">
+                <i class="ti ti-database-x risk-icon risk-icon--med" aria-hidden="true"></i>
+                <div class="risk-content">
+                  <div class="risk-title">Occupancy proxy, not actual data</div>
+                  <p class="risk-desc">
+                    Inside Airbnb estimates occupancy using the San Francisco
+                    Model. Calendar "unavailable" nights do not distinguish
+                    booked nights from host-blocked nights. True occupancy may
+                    differ significantly.
+                  </p>
+                </div>
+                <span class="risk-badge risk-med">Data quality</span>
+              </li>
+              <li class="risk-row">
+                <i class="ti ti-map-pin-x risk-icon risk-icon--med" aria-hidden="true"></i>
+                <div class="risk-content">
+                  <div class="risk-title">Anonymised listing locations</div>
+                  <p class="risk-desc">
+                    Listing coordinates are offset by up to 150 metres for
+                    privacy. Neighbourhood-level analysis is reliable;
+                    street-level micro-location analysis requires direct
+                    verification.
+                  </p>
+                </div>
+                <span class="risk-badge risk-med">Data quality</span>
+              </li>
+              <li class="risk-row">
+                <i class="ti ti-coin risk-icon risk-icon--low" aria-hidden="true"></i>
+                <div class="risk-content">
+                  <div class="risk-title">No purchase price or yield data</div>
+                  <p class="risk-desc">
+                    Long-term rental comparisons use UK HPI / HM Land Registry
+                    data. Purchase prices and gross yields are approximations.
+                    Transaction costs, mortgage costs, and management fees are
+                    excluded.
+                  </p>
+                </div>
+                <span class="risk-badge risk-low">Financial</span>
+              </li>
+              <li class="risk-row">
+                <i class="ti ti-trending-up risk-icon risk-icon--low" aria-hidden="true"></i>
+                <div class="risk-content">
+                  <div class="risk-title">Snapshot data — no seasonality</div>
+                  <p class="risk-desc">
+                    Inside Airbnb data is a point-in-time snapshot. Revenue
+                    estimates do not reflect seasonal variation. Actual revenue
+                    may be significantly higher in summer and lower in winter.
+                  </p>
+                </div>
+                <span class="risk-badge risk-low">Operational</span>
+              </li>
+              <li class="risk-row">
+                <i class="ti ti-calculator risk-icon risk-icon--low" aria-hidden="true"></i>
+                <div class="risk-content">
+                  <div class="risk-title">Investment score assumptions</div>
+                  <p class="risk-desc">
+                    Variables Q, I, P, N, and M are normalised to 0–100 before
+                    weighting. The maintenance penalty (M) is a proxy for
+                    bed/bath count and does not account for actual property
+                    condition or management costs.
+                  </p>
+                </div>
+                <span class="risk-badge risk-low">Model</span>
+              </li>
+            </ul>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+    <script src="main.js"></script>
+  </body>
+</html>
