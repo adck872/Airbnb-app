@@ -169,7 +169,7 @@ with st.sidebar:
     st.markdown("### 🏠 Airbnb Intel")
     st.divider()
 
-    city = st.selectbox("City", ["London", "Manchester", "Edinburgh", "Bristol", "Birmingham"])
+    city = st.selectbox("City", ["London", "Manchester", "Edinburgh", "Bristol"])
     investor_profile = st.selectbox("Investor profile", ["Balanced investor", "Revenue focused", "Risk focused"])
     room_type = st.selectbox("Room type", ["All types", "Entire home/apt", "Private room", "Shared room"])
 
