@@ -189,6 +189,11 @@ st.warning(
     icon="⚠️",
 )
 
+url = "https://rockborne-advance-group-2.s3.us-east-1.amazonaws.com/listings_neighbourhood_aggregated/part-00000-tid-8133673400815117121-4737fd7f-60af-49fc-ae06-3234010f7fb7-166-1-c000.csv"
+df = pd.read_csv(url)
+
+st.dataframe(df)
+
 # --------------------------------------------------------------------------
 # Tabs
 # --------------------------------------------------------------------------
@@ -258,9 +263,9 @@ with tab_overview:
 # ==========================================================================
 with tab_properties:
     st.info(
-        "**Investment score formula:**  `Score = 0.30·Q + 0.30·I + 0.20·P + 0.10·N − 0.10·M`\n\n"
-        "`Q` rating quality · `I` est. revenue (income) · `P` no. of bookings (popularity) · "
-        "`N` neighbourhood review quality · `M` no. beds/baths (maintenance cost)"
+        #"**Investment score formula:**  `Score = 0.30·Q + 0.30·I + 0.20·P + 0.10·N − 0.10·M`\n\n"
+       # "`Q` rating quality · `I` est. revenue (income) · `P` no. of bookings (popularity) · "
+       # "`N` neighbourhood review quality · `M` no. beds/baths (maintenance cost)"
     )
 
     cols = st.columns(3)
@@ -286,9 +291,9 @@ with tab_properties:
         )
         st.container(border=True).markdown(
             "🗺️ **Neighbourhood boundary map** — placeholder.\n\n"
-            "Plug in a real choropleth here using `plotly.express.choropleth_mapbox` once you "
-            "have GeoJSON boundaries and a `score` column per neighbourhood.\n\n"
-            "`Low` 🟥 🟧 🟨 🟩 🟢 `High`"
+            #"Plug in a real choropleth here using `plotly.express.choropleth_mapbox` once you "
+            #"have GeoJSON boundaries and a `score` column per neighbourhood.\n\n"
+            #`Low` 🟥 🟧 🟨 🟩 🟢 `High`"
         )
         st.selectbox(
             "Colour by",
