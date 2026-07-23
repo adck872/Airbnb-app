@@ -1,7 +1,17 @@
+import json
+import urllib.request
+
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from cache_loader import (
+    get_borough_recommendation,
+    get_property_type_recommendation,
+    get_review_summary,
+    get_sentiment,
+    get_last_lookups,
+)
 
 # Page config
 st.set_page_config(
@@ -13,7 +23,6 @@ st.set_page_config(
 ACCENT = "#D85A30"
 GREY = "#B4B2A9"
 
-
 # Sidebar
 with st.sidebar:
     st.markdown("### 🏠 Airbnb Intel")
@@ -24,23 +33,25 @@ with st.sidebar:
     room_type = st.selectbox("Room type", ["All types", "Entire home/apt", "Private room", "Shared room"])
 
     price_max = st.slider("Nightly price range (up to £)", 20, 500, 300, step=10)
-    min_listings = st.slider("Min. listings sampled (per neighbourhood)", 0, 200, 20, step=10)
+    min_listings = st.slider("Min. listings sampled (per local authority district)", 0, 200, 20, step=10)
     min_availability = st.slider("Min. availability (days/yr)", 0, 365, 60, step=10)
- 
-#Data loaded from s3 buckets 
-NEIGHBOURHOOD_URL = (
-    "https://rockborne-advance-group-2.s3.us-east-1.amazonaws.com/listings_city_neighbourhood_aggregated/part-00000-tid-8659415770633088101-e2bf734d-3463-4031-8135-a30a45be0b61-128-1-c000.csv"
-)
-PROPERTY_TYPE_URL = (
-    "https://rockborne-advance-group-2.s3.us-east-1.amazonaws.com/listings_city_neighbourhood_property_type_aggregated/part-00000-tid-4392307639532036816-409e45e1-3443-4936-b33f-f4b72afde7f0-129-1-c000.csv"
-)
 
-GEOJSON_URLS = {
-    "London": "https://rockborne-advance-group-2.s3.us-east-1.amazonaws.com/london_neighbourhoods.geojson",
-    "Manchester": "https://rockborne-advance-group-2.s3.us-east-1.amazonaws.com/manchester_neighbourhoods+.geojson",
-    "Edinburgh": "https://rockborne-advance-group-2.s3.us-east-1.amazonaws.com/edinburgh_neighbourhoods+.geojson",
-    "Bristol": "https://rockborne-advance-group-2.s3.us-east-1.amazonaws.com/bristol_neighbourhoods.geojson",
+    # debug_mode = st.checkbox("🔧 Show cache lookup debug info", value=False)
+    debug_mode = False  # default to off for public deployment
+
+# Data source — LAD level (post geospatial-join). This single table drives the
+# investment score, the top-LAD recommendations, the map, the citywide charts,
+# the property-type cards, and every AI cache lookup — it's the same grouping
+# the AI batch prompts were generated against.
+LAD_PTYPE_URL = "https://rockborne-advance-group-2.s3.us-east-1.amazonaws.com/city_lad_property_type_summary.csv"
+LAD_GEOJSON_URLS = {
+    "London": "https://rockborne-advance-group-2.s3.us-east-1.amazonaws.com/lad_geojson/london_lad_boundaries.geojson",
+    "Manchester": "https://rockborne-advance-group-2.s3.us-east-1.amazonaws.com/lad_geojson/manchester_lad_boundaries.geojson",
+    "Edinburgh": "https://rockborne-advance-group-2.s3.us-east-1.amazonaws.com/lad_geojson/edinburgh_lad_boundaries.geojson",
+    "Bristol": "https://rockborne-advance-group-2.s3.us-east-1.amazonaws.com/lad_geojson/bristol_lad_boundaries.geojson",
 }
+LAD_GEOJSON_FEATURE_KEY = "properties.local_authority_district"
+
 #City centre for map framing (not from the geojson)
 CITY_CENTER = {
     "London": dict(lat=51.4893, lon=-0.0882, zoom=8.6),
@@ -49,55 +60,36 @@ CITY_CENTER = {
     "Bristol": dict(lat=51.4709, lon=-2.6161, zoom=10.6),
 }
 
-#Fetch data from the S3 geojson URLs and cache the results 
-@st.cache_data
-def load_geojson(city: str) -> dict:
-    import json
-    import urllib.request
+VALID_CITIES = list(CITY_CENTER.keys())
 
-    with urllib.request.urlopen(GEOJSON_URLS[city]) as resp:
+#Fetch data from an S3 geojson URL and cache the result
+@st.cache_data
+def load_geojson_from_url(url: str) -> dict:
+    with urllib.request.urlopen(url) as resp:
         return json.load(resp)
 
-@st.cache_data
-def load_neighbourhood_city_map() -> dict:
-    mapping = {}
-    for city in GEOJSON_URLS:
-        gj = load_geojson(city)
-        for feat in gj["features"]:
-            mapping[feat["properties"]["neighbourhood"]] = city
-    return mapping
+
+@st.cache_data(show_spinner=False)
+def _read_csv_cached(url: str) -> pd.DataFrame:
+    """Only called on a successful read — a raised exception is never cached
+    by st.cache_data, so a fetch failure always retries on the next call."""
+    return pd.read_csv(url)
 
 
-
-#Match the city column in the dataframes to the cities in the geojson files 
-def _ensure_city_column(df: pd.DataFrame) -> pd.DataFrame:
-    city_col = next((c for c in df.columns if "city" in c.lower()), None)
-    lookup = load_neighbourhood_city_map()
-    if city_col is not None:
-        df = df.rename(columns={city_col: "city"})
-        df["city"] = df["city"].where(df["city"].isin(GEOJSON_URLS.keys()), df["neighbourhood"].map(lookup))
-    else:
-        df["city"] = df["neighbourhood"].map(lookup)
-    return df
+def try_load_csv(url: str) -> tuple[pd.DataFrame | None, str | None]:
+    """Returns (df, None) on success or (None, error_message) on failure. Not
+    decorated with st.cache_data itself, so a failure is never memoized."""
+    try:
+        return _read_csv_cached(url), None
+    except Exception as e:
+        return None, f"{type(e).__name__}: {e}"
 
 
-#Load and cache the listing tables 
-@st.cache_data
-def load_data():
-    nbhd = pd.read_csv(NEIGHBOURHOOD_URL)
-    ptype = pd.read_csv(PROPERTY_TYPE_URL)
-    #Make colum names match
-    ptype = ptype.rename(columns={"avg_median_property_priceavg_median_price": "avg_median_property_price"})
-    nbhd = _ensure_city_column(nbhd)
-    ptype = _ensure_city_column(ptype)
-    return nbhd, ptype
+#Load the LAD-level listing table. Returns (None, error_message) if not
+#reachable — callers must handle that.
+def load_lad_data():
+    return try_load_csv(LAD_PTYPE_URL)
 
-#Normalise function for score 
-def _normalize(s: pd.Series) -> pd.Series:
-    lo, hi = s.min(), s.max()
-    if hi - lo == 0:
-        return pd.Series(50.0, index=s.index)
-    return (s - lo) / (hi - lo) * 100
 
 #Renames the property types to match the UI labels
 def _bucket_property_type(pt: str) -> str:
@@ -115,45 +107,37 @@ def _weighted(d: pd.DataFrame, col: str) -> float:
     return (d[col] * d["listing_count"]).sum() / d["listing_count"].sum()
 
 
-# Investor-profile presets for the Score formula: Q=rating, I=revenue, P=popularity/no. of
-# bookings, N=location quality, M=guest-capacity (maintenance-cost proxy, subtracted).
-INVESTOR_WEIGHTS = {
-    "Balanced investor": dict(Q=0.30, I=0.30, P=0.20, N=0.10, M=0.10),
-    "Revenue focused": dict(Q=0.15, I=0.50, P=0.20, N=0.05, M=0.10),
-    "Risk focused": dict(Q=0.40, I=0.15, P=0.10, N=0.35, M=0.00),
-}
-
-#Static lookup values for tables and graphs 
+#Static lookup values for tables and graphs
 PRICE_BANDS = [0, 40, 60, 80, 100, 120, 160, 200, 300, float("inf")]
-PRICE_LABELS = ["<£40", "£40–60", "£60–80", "£80–100", "£100–120", "£120–160", "£160–200", "£200–300", "£300+"]
+PRICE_LABELS = ["<£40", "£40-60", "£60-80", "£80-100", "£100-120", "£120-160", "£160-200", "£200-300", "£300+"]
 ACCOM_BANDS = [0, 1.5, 2.5, 3.5, 4.5, float("inf")]
 ACCOM_LABELS = ["Studio", "1 bed", "2 bed", "3 bed", "4 bed+"]
 PROPERTY_TYPE_ICONS = {"Entire home/apt": "🏠", "Private room": "🚪", "Shared room": "👥"}
 
 
-def _empty_tables():
-    boroughs = pd.DataFrame(columns=["Borough", "Med. price (£)", "Occupancy (%)", "Est. revenue (£k)", "Score"])
-    price_dist = pd.DataFrame({"Band": PRICE_LABELS, "Listings": [0] * len(PRICE_LABELS)})
-    bedroom_revenue = pd.DataFrame({"Bedrooms": ACCOM_LABELS, "Revenue (£)": [0] * len(ACCOM_LABELS)})
-    return boroughs, price_dist, bedroom_revenue, [], [], [], 0, pd.DataFrame(columns=["Borough", "Score"])
+def _empty_lad_tables():
+    boroughs = pd.DataFrame(columns=["Borough", "Med. price (£)", "Availability (days/yr)", "Est. revenue (£k)", "Score"])
+    return boroughs, [], pd.DataFrame(columns=["Borough", "Score"])
 
 
-#Use filters on side bar to compute the tables and graphs for the app
-def compute_tables(ptype_raw, city, price_max, min_availability, room_type, min_listings, investor_profile):
-    ptype = ptype_raw[
-        (ptype_raw["city"] == city)
-        & (ptype_raw["average_price"] <= price_max)
-        & (ptype_raw["availability"] >= min_availability)
+#Score + top-LAD recommendations, computed from the LAD property-type table.
+def compute_lad_tables(lad_ptype_raw, city, price_max, min_availability, room_type, min_listings, investor_profile):
+    if lad_ptype_raw is None:
+        return _empty_lad_tables()
+
+    d = lad_ptype_raw[
+        (lad_ptype_raw["city"] == city)
+        & (lad_ptype_raw["average_price"] <= price_max)
+        & (lad_ptype_raw["availability"] >= min_availability)
     ]
     if room_type != "All types":
-        ptype = ptype[ptype["bucket"] == room_type]
+        d = d[d["bucket"] == room_type]
 
-    if ptype.empty:
-        return _empty_tables()
+    if d.empty:
+        return _empty_lad_tables()
 
-    # Re-aggregate up to neighbourhood level from the filtered rows
-    nbhd_agg = (
-        ptype.groupby("neighbourhood")
+    lad_agg = (
+        d.groupby("local_authority_district")
         .apply(
             lambda g: pd.Series(
                 {
@@ -163,39 +147,71 @@ def compute_tables(ptype_raw, city, price_max, min_availability, room_type, min_
                     "estimated_revenue": _weighted(g, "estimated_revenue"),
                     "average_review_score": _weighted(g, "average_review_score"),
                     "average_location_score": _weighted(g, "average_location_score"),
-                    "accomodates": _weighted(g, "accomodates"),
+                    "reviews_per_month": _weighted(g, "reviews_per_month"),
+                    "accommodates": _weighted(g, "accommodates"),
+                    # lad_score is constant across every property-type row for a
+                    # given LAD (denormalised upstream), so any row's value is
+                    # the correct one — .iloc[0] rather than an average of it.
+                    "Score": g["lad_score"].iloc[0],
                 }
             )
         )
         .reset_index()
     )
-    nbhd_agg = nbhd_agg[nbhd_agg["listing_count"] >= min_listings]
-    if nbhd_agg.empty:
-        return _empty_tables()
+    lad_agg = lad_agg[lad_agg["listing_count"] >= min_listings]
+    if lad_agg.empty:
+        return _empty_lad_tables()
 
-    w = INVESTOR_WEIGHTS[investor_profile]
-    nbhd_agg["Score"] = (
-        w["Q"] * _normalize(nbhd_agg["average_review_score"])
-        + w["I"] * _normalize(nbhd_agg["estimated_revenue"])
-        + w["P"] * _normalize(nbhd_agg["listing_count"])
-        + w["N"] * _normalize(nbhd_agg["average_location_score"])
-        - w["M"] * _normalize(nbhd_agg["accomodates"])
-    )
-    nbhd_agg["Score"] = _normalize(nbhd_agg["Score"]).round().astype(int)
-
-    #Sort boroughs by score 
-    boroughs_full = nbhd_agg.sort_values("Score", ascending=False).rename(columns={"neighbourhood": "Borough"})
+    boroughs_full = lad_agg.sort_values("Score", ascending=False).rename(columns={"local_authority_district": "Borough"})
     boroughs = (
         boroughs_full.head(7)
         .assign(
             **{
-                "Med. price (£)": lambda d: d["average_price"].round(0),
-                "Occupancy (%)": lambda d: d["availability"].round(0),
-                "Est. revenue (£k)": lambda d: (d["estimated_revenue"] / 1000).round(1),
+                "Med. price (£)": lambda x: x["average_price"].round(0),
+                "Availability (days/yr)": lambda x: x["availability"].round(0),
+                "Est. revenue (£k)": lambda x: (x["estimated_revenue"] / 1000).round(1),
+                "Score": lambda x: x["Score"].round().astype(int),
             }
-        )[["Borough", "Med. price (£)", "Occupancy (%)", "Est. revenue (£k)", "Score"]]
+        )[["Borough", "Med. price (£)", "Availability (days/yr)", "Est. revenue (£k)", "Score"]]
         .reset_index(drop=True)
     )
+
+    borough_recs = []
+    for i, row in boroughs.head(3).reset_index(drop=True).iterrows():
+        src = lad_agg.loc[lad_agg["local_authority_district"] == row["Borough"]].iloc[0]
+        body = (
+            f"Median nightly rate of £{row['Med. price (£)']:.0f} with an average availability of "
+            f"{row['Availability (days/yr)']:.0f}. Estimated annual revenue of £{row['Est. revenue (£k)']:.1f}k across "
+            f"{int(src['listing_count'])} matching listings. Average review score {src['average_review_score']:.2f}/5 "
+            f"and location score {src['average_location_score']:.2f}/5."
+        )
+        ai = get_borough_recommendation(city, row["Borough"], investor_profile)
+        if ai is None:
+            ai = "AI rationale not yet available for this local authority district — showing the metrics summary above instead."
+        borough_recs.append(dict(rank=i + 1, name=row["Borough"], score=int(row["Score"]), body=body, ai=ai))
+
+    return boroughs, borough_recs, boroughs_full[["Borough", "Score"]]
+
+
+def _empty_citywide_tables():
+    price_dist = pd.DataFrame({"Band": PRICE_LABELS, "Listings": [0] * len(PRICE_LABELS)})
+    bedroom_revenue = pd.DataFrame({"Bedrooms": ACCOM_LABELS, "Revenue (£)": [0] * len(ACCOM_LABELS)})
+    return price_dist, bedroom_revenue, [], [], 0
+
+
+#Charts + property-type cards, aggregated city-wide across all of that city's LADs
+#from the single LAD-level property-type table.
+def compute_citywide_tables(lad_ptype_raw, city, price_max, min_availability, room_type, investor_profile):
+    ptype = lad_ptype_raw[
+        (lad_ptype_raw["city"] == city)
+        & (lad_ptype_raw["average_price"] <= price_max)
+        & (lad_ptype_raw["availability"] >= min_availability)
+    ]
+    if room_type != "All types":
+        ptype = ptype[ptype["bucket"] == room_type]
+
+    if ptype.empty:
+        return _empty_citywide_tables()
 
     price_binned = ptype.assign(Band=pd.cut(ptype["average_price"], PRICE_BANDS, labels=PRICE_LABELS))
     price_dist = (
@@ -206,7 +222,7 @@ def compute_tables(ptype_raw, city, price_max, min_availability, room_type, min_
         .rename(columns={"listing_count": "Listings"})
     )
 
-    accom_binned = ptype.assign(Bedrooms=pd.cut(ptype["accomodates"], ACCOM_BANDS, labels=ACCOM_LABELS))
+    accom_binned = ptype.assign(Bedrooms=pd.cut(ptype["accommodates"], ACCOM_BANDS, labels=ACCOM_LABELS))
     bedroom_revenue = (
         accom_binned.groupby("Bedrooms", observed=True)
         .apply(lambda d: (d["estimated_revenue"] * d["listing_count"]).sum() / d["listing_count"].sum())
@@ -217,9 +233,6 @@ def compute_tables(ptype_raw, city, price_max, min_availability, room_type, min_
 
     ptype = ptype.copy()
     total_listings = ptype["listing_count"].sum()
-    ptype["_norm_review"] = _normalize(ptype["average_review_score"])
-    ptype["_norm_revenue"] = _normalize(ptype["estimated_revenue"])
-    ptype["_norm_count"] = _normalize(ptype["listing_count"])
 
     property_types = []
     for bucket_name in ["Entire home/apt", "Private room", "Shared room"]:
@@ -231,12 +244,12 @@ def compute_tables(ptype_raw, city, price_max, min_availability, room_type, min_
         occ = _weighted(d, "availability")
         revenue = _weighted(d, "estimated_revenue")
         rating = _weighted(d, "average_review_score")
-        score = (
-            0.30 * _weighted(d, "_norm_review")
-            + 0.30 * _weighted(d, "_norm_revenue")
-            + 0.20 * min(occ, 100)
-            + 0.20 * _weighted(d, "_norm_count")
-        )
+        # property_type_score is precomputed upstream (property_type_scored) at
+        # (city, property_type) grain, where property_type is Inside Airbnb's raw
+        # value (e.g. "Entire rental unit"). Multiple raw types roll into one
+        # bucket here for display, so the card's score is a listing-weighted
+        # average across whichever raw types are in this bucket.
+        score = _weighted(d, "property_type_score")
         property_types.append(
             dict(
                 name=bucket_name,
@@ -246,23 +259,9 @@ def compute_tables(ptype_raw, city, price_max, min_availability, room_type, min_
                 occ=round(occ),
                 revenue=round(revenue / 1000, 1),
                 rating=round(rating, 2),
-                score=min(round(score), 100),
+                score=round(score),
             )
         )
-
-    borough_recs = []
-    for i, row in boroughs.head(3).reset_index(drop=True).iterrows():
-        src = nbhd_agg.loc[nbhd_agg["neighbourhood"] == row["Borough"]].iloc[0]
-        body = (
-            f"Median nightly rate of £{row['Med. price (£)']:.0f} with an average availability score of "
-            f"{row['Occupancy (%)']:.0f}. Estimated annual revenue of £{row['Est. revenue (£k)']:.1f}k across "
-            f"{int(src['listing_count'])} matching listings. Average review score {src['average_review_score']:.2f}/5 "
-            f"and location score {src['average_location_score']:.2f}/5."
-        )
-        ai = (
-         "Will be generated with AI"
-        )
-        borough_recs.append(dict(rank=i + 1, name=row["Borough"], score=int(row["Score"]), body=body, ai=ai))
 
     property_recs = []
     for prop in sorted(property_types, key=lambda p: p["score"], reverse=True)[:2]:
@@ -271,26 +270,27 @@ def compute_tables(ptype_raw, city, price_max, min_availability, room_type, min_
             f"{prop['occ']}. Est. annual revenue £{prop['revenue']}k/yr. Avg. review score (Q) "
             f"{prop['rating']}/5."
         )
-        property_recs.append(dict(name=prop["name"], icon=prop["icon"], score=prop["score"], body=body))
+        ai = get_property_type_recommendation(prop["name"], investor_profile)
+        property_recs.append(dict(name=prop["name"], icon=prop["icon"], score=prop["score"], body=body, ai=ai))
 
     total_listings = int(ptype["listing_count"].sum())
-    return boroughs, price_dist, bedroom_revenue, property_types, borough_recs, property_recs, total_listings, boroughs_full[["Borough", "Score"]]
+    return price_dist, bedroom_revenue, property_types, property_recs, total_listings
 
 
-nbhd_df, ptype_df = load_data()
-ptype_df["bucket"] = ptype_df["property_type"].apply(_bucket_property_type)
+lad_ptype_df, LAD_LOAD_ERROR = load_lad_data()
+LAD_DATA_AVAILABLE = lad_ptype_df is not None
+if LAD_DATA_AVAILABLE:
+    lad_ptype_df["bucket"] = lad_ptype_df["property_type"].apply(_bucket_property_type)
 
-BOROUGHS, PRICE_DIST, BEDROOM_REVENUE, PROPERTY_TYPES, BOROUGH_RECS, PROPERTY_RECS, TOTAL_LISTINGS, CITY_SCORES = compute_tables(
-    ptype_df, city, price_max, min_availability, room_type, min_listings, investor_profile
+BOROUGHS, BOROUGH_RECS, CITY_SCORES = compute_lad_tables(
+    lad_ptype_df, city, price_max, min_availability, room_type, min_listings, investor_profile
 )
-
-# Place holders for AI sentiment analysis 
-POSITIVE_THEMES = [("Location", 84), ("Cleanliness", 76), ("Value", 68), ("Check-in", 61), ("Comfort", 55)]
-NEGATIVE_THEMES = [("Noise", 32), ("Wi-Fi", 18), ("Communication", 14), ("Size", 11), ("Access", 8)]
-
-AI_REVIEW_SUMMARY = (
-    ""
-)
+if LAD_DATA_AVAILABLE:
+    PRICE_DIST, BEDROOM_REVENUE, PROPERTY_TYPES, PROPERTY_RECS, TOTAL_LISTINGS = compute_citywide_tables(
+        lad_ptype_df, city, price_max, min_availability, room_type, investor_profile
+    )
+else:
+    PRICE_DIST, BEDROOM_REVENUE, PROPERTY_TYPES, PROPERTY_RECS, TOTAL_LISTINGS = _empty_citywide_tables()
 
 RISKS = [
     ("🔴", "90-night cap (London)",
@@ -302,7 +302,7 @@ RISKS = [
      "nights do not distinguish booked nights from host-blocked nights. True occupancy may differ "
      "significantly.", "Data quality", "med"),
     ("🟠", "Anonymised listing locations",
-     "Listing coordinates are offset by up to 150 metres for privacy. Neighbourhood-level analysis "
+     "Listing coordinates are offset by up to 150 metres for privacy. LAD-level analysis "
      "is reliable; street-level micro-location analysis requires direct verification.",
      "Data quality", "med"),
     ("🟢", "No purchase price or yield data",
@@ -314,9 +314,10 @@ RISKS = [
      "variation. Actual revenue may be significantly higher in summer and lower in winter.",
      "Operational", "low"),
     ("🟢", "Investment score assumptions",
-     "Score variables Q, I, P, N, and M are normalised to 0–100 before weighting. The maintenance "
-     "penalty (M) is a proxy for bed/bath count and does not account for actual property condition "
-     "or local management costs.", "Model", "low"),
+     "The investment score is precomputed upstream from the raw listings data as a weighted blend "
+     "of percentile ranks: 25% estimated revenue, 25% occupancy proxy, 20% reviews per month, 20% "
+     "review location score, 10% overall review score. It does not change with the investor profile "
+     "selector — profile only affects the tone of the AI-generated text, not the ranking.", "Model", "low"),
 ]
 
 RISK_BADGE_COLOR = {"high": "#A32D2D", "med": "#854F0B", "low": "#3B6D11"}
@@ -331,6 +332,30 @@ def score_color(score: int) -> str:
     return "#A32D2D", "#FCEBEB"      # low
 
 
+with st.sidebar:
+    if debug_mode:
+        st.divider()
+        st.markdown("**Cache lookups (most recent)**")
+        if st.button("♻️ Clear cache & retry"):
+            st.cache_data.clear()
+            st.rerun()
+        lookups = get_last_lookups()
+        if not lookups:
+            st.caption("No cache lookups yet this run.")
+        else:
+            st.dataframe(
+                pd.DataFrame(lookups)[["feature", "key", "status"]],
+                hide_index=True, width='stretch', height=180,
+            )
+            failures = [l for l in lookups if l["status"] != "hit"]
+            if failures:
+                st.markdown("**Failure detail**")
+                for f in failures[-10:]:
+                    st.code(f"[{f['status']}] {f['feature']}/{f['key']}\n{f['detail']}", language=None)
+        if not LAD_DATA_AVAILABLE:
+            st.warning("LAD-level CSV not reachable — check LAD_PTYPE_URL in main.py.")
+
+
 # Tabs
 tab_overview, tab_properties, tab_recs, tab_reviews, tab_risks = st.tabs(
     ["🗺️ Market overview", "🏢 Property types", "⭐ Recommendations", "💬 Review analysis", "🛡️ Risks & assumptions"]
@@ -339,47 +364,56 @@ tab_overview, tab_properties, tab_recs, tab_reviews, tab_risks = st.tabs(
 
 #Tab 1 — market overview
 with tab_overview:
-    if BOROUGHS.empty:
+    if not LAD_DATA_AVAILABLE:
+        st.info(
+            "LAD-level scoring data hasn't been uploaded to S3 yet. See lad_rebuild_spec.md for the "
+            "expected file locations — this tab will populate automatically once they're in place."
+        )
+    elif BOROUGHS.empty:
         st.info("No listings match the current filters — try relaxing the price, availability, or min. listings sliders.")
     else:
-
-
-
-
-
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Matching listings", f"{TOTAL_LISTINGS:,}")
         c2.metric("Median nightly price", f"£{BOROUGHS['Med. price (£)'].median():.0f}")
-        c3.metric("Avg. occupancy proxy", f"{BOROUGHS['Occupancy (%)'].mean():.0f}%")
+        c3.metric("Avg. availability (days/yr)", f"{BOROUGHS['Availability (days/yr)'].mean():.0f}".replace('%', ''))
         c4.metric("Est. annual revenue (median)", f"£{BOROUGHS['Est. revenue (£k)'].median():.1f}k")
 
-        st.markdown("**Top boroughs by investment score**")
+        st.markdown("**Top local authority districts by investment score**")
 
         def fmt_score(s):
-                txt_color, bg_color = score_color(s)
-                return f"background-color:{bg_color}; color:{txt_color}; font-weight:600; text-align:center;"
+            txt_color, bg_color = score_color(s)
+            return f"background-color:{bg_color}; color:{txt_color}; font-weight:600; text-align:center;"
 
         styled = BOROUGHS.style.map(fmt_score, subset=["Score"]).format(
-                {"Med. price (£)": "£{:.0f}", "Occupancy (%)": "{:.0f}%",
-                 "Est. revenue (£k)": "£{:.1f}k", "Score": "{:.0f}"}
+            {"Med. price (£)": "£{:.0f}", "Availability (days/yr)": "{:.0f}",
+             "Est. revenue (£k)": "£{:.1f}k", "Score": "{:.0f}"}
         )
         st.dataframe(styled, hide_index=True, width='stretch')
 
-        st.markdown("**Neighbourhood investment score map**")
-        st.caption(f"Choropleth of {city} neighbourhoods, coloured by investment score under the current filters.")
-        if CITY_SCORES.empty:
-                st.info("No listings match the current filters.")
+        st.markdown("**LAD investment score map**")
+        st.caption(f"Choropleth of {city}'s local authority districts, coloured by investment score under the current filters. Colour scale is relative to the current selection's min/max, not a fixed 0–100 range.")
+        geojson = load_geojson_from_url(LAD_GEOJSON_URLS[city]) if city in LAD_GEOJSON_URLS else None
+        if geojson is None:
+            st.warning(f"No LAD boundary file configured for {city} yet.")
+        elif CITY_SCORES.empty:
+            st.info("No listings match the current filters.")
         else:
-            geojson = load_geojson(city)
+            score_min = CITY_SCORES["Score"].min()
+            score_max = CITY_SCORES["Score"].max()
+            if score_min == score_max:
+                # Single LAD, or every visible LAD tied on score — a flat
+                # range would otherwise render as one undifferentiated colour.
+                score_min -= 5
+                score_max += 5
             map_fig = go.Figure(
                 go.Choroplethmapbox(
                     geojson=geojson,
                     locations=CITY_SCORES["Borough"],
                     z=CITY_SCORES["Score"],
-                    featureidkey="properties.neighbourhood",
+                    featureidkey=LAD_GEOJSON_FEATURE_KEY,
                     colorscale=[[0, "#FCEBEB"], [0.5, "#FAEEDA"], [1, ACCENT]],
-                    zmin=0,
-                    zmax=100,
+                    zmin=score_min,
+                    zmax=score_max,
                     marker_opacity=0.85,
                     marker_line_width=0.5,
                     marker_line_color="white",
@@ -395,11 +429,16 @@ with tab_overview:
                 margin=dict(l=0, r=0, t=0, b=0),
             )
             st.plotly_chart(map_fig, width='stretch')
-        
+
 # Tab 2 — property types
 with tab_properties:
 
-    if not PROPERTY_TYPES:
+    if not LAD_DATA_AVAILABLE:
+        st.info(
+            "LAD-level data hasn't been uploaded to S3 yet. See lad_rebuild_spec.md for the "
+            "expected file location — this tab will populate automatically once it's in place."
+        )
+    elif not PROPERTY_TYPES:
         st.info("No listings match the current filters.")
     else:
         cols = st.columns(3)
@@ -409,7 +448,7 @@ with tab_properties:
                     st.markdown(f"#### {prop['icon']} {prop['name']}")
                     st.caption(prop["share"])
                     st.write(f"**Median price:** £{prop['price']}/night")
-                    st.write(f"**Avg. occupancy:** {prop['occ']}%")
+                    st.write(f"**Avg. availability:** {prop['occ']} days/yr")
                     st.write(f"**Est. annual revenue:** £{prop['revenue']}k")
                     st.write(f"**Avg. review score (Q):** {prop['rating']} / 5")
                     st.write(f"**Investment score:** {prop['score']} / 100")
@@ -417,14 +456,14 @@ with tab_properties:
 
         col_left, col_right = st.columns(2)
 
-        with col_left:      
+        with col_left:
             st.markdown("**Nightly price distribution**")
             fig1 = go.Figure(go.Bar(x=PRICE_DIST["Band"], y=PRICE_DIST["Listings"], marker_color=ACCENT))
             fig1.update_layout(
-                    height=260,
-                    margin=dict(l=10, r=10, t=10, b=10),
-                    plot_bgcolor="rgba(0,0,0,0)",
-                    paper_bgcolor="rgba(0,0,0,0)",
+                height=260,
+                margin=dict(l=10, r=10, t=10, b=10),
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
             )
             st.plotly_chart(fig1, width='stretch')
 
@@ -440,7 +479,6 @@ with tab_properties:
             )
             st.plotly_chart(fig3, width='stretch')
 
- 
 
 #Tab 3 - recommendations
 
@@ -453,10 +491,17 @@ with tab_recs:
     #if regenerate:
         #this calls an LLM to refresh the memo with live data
 
-    if not BOROUGH_RECS:
+    if not LAD_DATA_AVAILABLE:
+        st.info(
+            "LAD-level data hasn't been uploaded to S3 yet, so recommendations can't be computed. "
+            "See lad_rebuild_spec.md for the expected file location."
+        )
+    elif not BOROUGH_RECS:
         st.info("No listings match the current filters.")
     else:
-        st.markdown("##### Top 3 recommended boroughs")
+        n_boroughs = len(BOROUGH_RECS)
+        heading = "Top recommended local authority district" if n_boroughs == 1 else f"Top {n_boroughs} recommended local authority districts"
+        st.markdown(f"##### {heading}")
         for rec in BOROUGH_RECS:
             with st.container(border=True):
                 top_l, top_r = st.columns([4, 1])
@@ -466,6 +511,7 @@ with tab_recs:
                 with st.expander("🤖 AI rationale"):
                     st.write(rec["ai"])
 
+    if LAD_DATA_AVAILABLE and PROPERTY_RECS:
         st.markdown("##### Top recommended property types")
         cols = st.columns(2)
         for col, prop in zip(cols, PROPERTY_RECS):
@@ -473,7 +519,11 @@ with tab_recs:
                 with st.container(border=True):
                     st.markdown(f"**{prop['icon']} {prop['name']}**  `Score: {prop['score']}`")
                     st.write(prop["body"])
+                    if prop.get("ai"):
+                        with st.expander("🤖 AI rationale"):
+                            st.write(prop["ai"])
 
+    if BOROUGH_RECS:
         st.download_button(
             "⬇️ Export memo (.txt)",
             data="\n\n".join(f"{r['rank']}. {r['name']} (Score {r['score']})\n{r['body']}" for r in BOROUGH_RECS),
@@ -482,29 +532,53 @@ with tab_recs:
 
 #Tab 4 - review analysis
 with tab_reviews:
-    head_col, btn_col = st.columns([3, 1])
-    with head_col:
-        st.write("Analysing: **Southwark · 1,240 reviews sampled**")
-    #with btn_col:
-       # if st.button("✨ Analyse reviews", width='stretch'):
-          #  this would call an LLM to summarise fresh review text
+    if not LAD_DATA_AVAILABLE:
+        st.info("LAD-level scoring data hasn't been uploaded to S3 yet, so there's no top LAD to analyse reviews for.")
+    elif BOROUGHS.empty:
+        st.info("No listings match the current filters — try relaxing the price, availability, or min. listings sliders.")
+    else:
+        top_borough = BOROUGHS.iloc[0]["Borough"]
+        summary = get_review_summary(city, top_borough)
+        sentiment = get_sentiment(city, top_borough)
 
-    col_left, col_right = st.columns(2)
-    with col_left:
-        st.markdown("**Positive themes**")
-        for theme, pct in POSITIVE_THEMES:
-            st.write(f"{theme} — {pct}%")
-            st.progress(pct / 100)
+        head_col, btn_col = st.columns([3, 1])
+        with head_col:
+            st.write(f"Analysing: **{top_borough}, {city}**")
+        #with btn_col:
+           # if st.button("✨ Analyse reviews", width='stretch'):
+              #  this would call an LLM to summarise fresh review text
 
-    with col_right:
-        st.markdown("**Negative themes**")
-        for theme, pct in NEGATIVE_THEMES:
-            st.write(f"{theme} — {pct}%")
-            st.progress(pct / 100)
+        col_left, col_right = st.columns(2)
+        with col_left:
+            st.markdown("**Positive themes**")
+            positive_themes = (sentiment or {}).get("positive_themes") or []
+            if positive_themes:
+                for t in positive_themes:
+                    st.write(f"{t['theme']} — {t['pct']}%")
+                    st.progress(t["pct"] / 100)
+            else:
+                st.caption("Sentiment breakdown not available for this LAD yet.")
 
-    #st.markdown("**AI review summary**")
-   # with st.container(border=True):
-    #    st.markdown(AI_REVIEW_SUMMARY)
+        with col_right:
+            st.markdown("**Negative themes**")
+            negative_themes = (sentiment or {}).get("negative_themes") or []
+            if negative_themes:
+                for t in negative_themes:
+                    st.write(f"{t['theme']} — {t['pct']}%")
+                    st.progress(t["pct"] / 100)
+            else:
+                st.caption("Sentiment breakdown not available for this LAD yet.")
+
+        st.markdown("**AI review summary**")
+        with st.container(border=True):
+            if summary and summary.get("summary"):
+                st.markdown(summary["summary"])
+                st.caption(summary.get("investment_signal", ""))
+            else:
+                st.caption(
+                    f"No review summary cached yet for {top_borough} — this LAD may have had "
+                    "fewer than 5 sampled reviews, or the last batch run hasn't completed."
+                )
 
 #Tab 5 - risks and assumptions
 
