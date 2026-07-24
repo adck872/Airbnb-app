@@ -36,7 +36,7 @@ Underlying raw data is from [Inside Airbnb](http://insideairbnb.com/).
 
 ```bash
 git clone https://github.com/adck872/Airbnb-app/
-cd <repo-directory>
+cd Airbnb-app
 pip install -r streamlit/requirements.txt
 ```
 
